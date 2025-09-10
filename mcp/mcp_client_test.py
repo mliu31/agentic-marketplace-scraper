@@ -23,7 +23,6 @@ class MCPClient:
         self.anthropic = Anthropic()
         # self.gemini = genai.Client()
         
-    
     # methods will go here
     async def connect_to_server(self, server_script_path: str):
         """Connect to an MCP server
@@ -54,16 +53,109 @@ class MCPClient:
         tools = response.tools
         print("\nConnected to server with tools:", [tool.name for tool in tools])
 
+    """
+    async def process_query(self, query: str) -> str:
+        # Process a query using Claude and available tools 
+        # get all tools 
+        response = await self.session.list_tools()
+        available_tools = [{
+            "name": tool.name,
+            "description": tool.description,
+            "input_schema": tool.inputSchema
+        } for tool in response.tools]
+
+        # store all assistant/user messages throughout entire session
+        self.history.append({
+                "role": "user",
+                "content": [ {"type":"text","text": query} ]
+            })
+        # store output to be printed 
+        final_text = []
+
+        def text_block_to_dict(sdk_block) -> dict:
+            # sdk_block is anthropic.types.TextBlock
+            return {"type": "text", "text": sdk_block.text}
+
+        def tool_use_block_to_dict(sdk_block) -> dict:
+            # sdk_block is anthropic.types.ToolUseBlock
+            return {
+                "type": "tool_use",
+                "id": sdk_block.id,
+                "name": sdk_block.name,
+                "input": sdk_block.input,  
+            }
+
+        while True: 
+            # claude api call 
+            response = self.anthropic.messages.create(
+                model=self.model,
+                max_tokens=1000,
+                messages=self.history,
+                tools=available_tools
+            )
+
+            tu_count = 0
+            assistant_content = [] 
+            tool_content = []
+            # Loop through response content
+            for content in response.content:
+                print(content)
+
+                if content.type == 'text':
+                    final_text.append(content.text)
+                    assistant_content.append(content.text)
+                elif content.type == 'tool_use':
+                    tu_count += 1 
+
+                    # execute tool calls 
+                    # update history 
+
+                    tool_name = content.name
+                    tool_args = content.input
+
+                    # Execute tool call
+                    result = await self.session.call_tool(tool_name, tool_args)
+                    final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
+
+                    assistant_content.append(tool_use_block_to_dict(content))
+                    tool_content.append(tool_use_block_to_dict(result.content))
+                   
+                
+                if tu_count == 0: 
+                    self.history.append({
+                        "role": "assistant",
+                        "content": assistant_content
+                    })
+                    self.history.append({
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": content.id,
+                                "content": tool_content
+                            }
+                        ]
+                    })
+                    break
+
+
+        return "\n".join(final_text)
+    """
     async def process_query(self, query: str) -> str:
         """Process a query using Claude and available tools"""
         messages = [
-            {
-                "role": "user",
-                "content": query
-            }
-        ]
+        {
+            "role": "user",
+            "content": query
+        }
+    ]
 
         response = await self.session.list_tools()
+        print("tool list------------------------------------------")
+        print(response)
+        print(response.tools)
+
+
         available_tools = [{
             "name": tool.name,
             "description": tool.description,
@@ -77,6 +169,9 @@ class MCPClient:
             messages=messages,
             tools=available_tools
         )
+        print("intiial claude api call-------------------------------")
+        print(response)
+        print(response.content)
 
         # Process response and handle tool calls
         final_text = []
@@ -90,9 +185,16 @@ class MCPClient:
                 tool_name = content.name
                 tool_args = content.input
 
+                final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
                 # Execute tool call
                 result = await self.session.call_tool(tool_name, tool_args)
-                final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
+                print("tool exec result------------------------------------------")
+                print(result)
+                print("***")
+                print(result.content[0].text)
+
+                final_text.append(result.content[0].text)
+
 
                 assistant_message_content.append(content)
                 messages.append({
@@ -109,19 +211,9 @@ class MCPClient:
                         }
                     ]
                 })
+                # final_text.append(result.content)
 
-                # Get next response from Claude
-                response = self.anthropic.messages.create(
-                    model=self.model,
-                    max_tokens=1000,
-                    messages=messages,
-                    tools=available_tools
-                )
-                print("**")
-                print(response.content)
-                print("**")
-
-                final_text.append(response.content[0].text)
+                # final_text.append(response[0].text)
 
         return "\n".join(final_text)
 

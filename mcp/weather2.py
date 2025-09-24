@@ -35,7 +35,7 @@ Instructions: {props.get('instruction', 'No specific instructions provided')}
 """
 
 @mcp.tool()
-async def get_alerts(state: str) -> str:
+async def get_alerts2(state: str) -> str:
     """Get weather alerts for a US state.
 
     Args:
@@ -54,7 +54,7 @@ async def get_alerts(state: str) -> str:
     return "\n---\n".join(alerts)
 
 @mcp.tool()
-async def get_forecast(latitude: float, longitude: float) -> str:
+async def get_forecast2(latitude: float, longitude: float) -> str:
     """Get weather forecast for a location.
 
     Args:
@@ -92,4 +92,5 @@ Forecast: {period['detailedForecast']}
 
 if __name__ == "__main__":
     # Initialize and run the server
+    print("Running weather MCP server")
     mcp.run(transport='stdio')

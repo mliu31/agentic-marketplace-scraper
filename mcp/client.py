@@ -9,26 +9,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-class MCPClient:
-    """
-    This class now acts as an MCP Host, managing multiple client sessions.
-    """
+class MCPHost:
+    """MCP Host managing multiple client sessions."""
+    
     def __init__(self):
-        # NEW: Store multiple sessions, keyed by server path for identification.
-        self.sessions: Dict[str, ClientSession] = {} 
-        # NEW: A map to find which session a tool belongs to.
+        self.sessions: Dict[str, ClientSession] = {}
         self.tool_to_session_map: Dict[str, ClientSession] = {}
-        # NEW: A single, aggregated list of all tools from all servers.
         self.tools: List[Dict[str, Any]] = []
-
         self.exit_stack = AsyncExitStack()
         self.anthropic = Anthropic()
         self.conversation_history = []
 
     async def connect_to_server(self, server_script_path: str):
-        """
-        Connects to a single server and adds its session and tools to the host's state.
-        """
+        """Connect to a server and add its tools to the host."""
         is_python = server_script_path.endswith('.py')
         is_js = server_script_path.endswith('.js')
         
@@ -45,10 +38,10 @@ class MCPClient:
         
         await session.initialize()
         
-        # NEW: Store the session in our dictionary
+        # Store session
         self.sessions[server_script_path] = session
         
-        # Get tools for THIS server
+        # Get tools for this server
         response = await session.list_tools()
         server_tools = [{
             "name": tool.name,
@@ -57,23 +50,21 @@ class MCPClient:
         } for tool in response.tools]
         
         print(f"Connected to {server_script_path} with tools:")
-        # NEW: Add this server's tools to our aggregated list and map
         for tool in server_tools:
             print(f"---name: {tool['name']}")
-            self.tools.append(tool) # Add to the main list
-            self.tool_to_session_map[tool['name']] = session # Map tool name to its session
+            self.tools.append(tool)
+            self.tool_to_session_map[tool['name']] = session
             
     async def process_query(self, query: str) -> str:
         self.conversation_history.append({"role": "user", "content": query})
         log_parts = []
 
         while True:
-            # The Claude API call now receives the aggregated list of all tools
             claude_response = self.anthropic.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=1000,
                 messages=self.conversation_history,
-                tools=self.tools # Pass the combined tool list
+                tools=self.tools
             )
 
             assistant_content = []
@@ -95,14 +86,11 @@ class MCPClient:
             for tool_call in tool_calls_to_execute:
                 log_parts.append(f"CALLING TOOL: {tool_call.name} WITH {tool_call.input}")
                 
-                # NEW: Look up the correct session for this specific tool
                 target_session = self.tool_to_session_map.get(tool_call.name)
 
                 if not target_session:
-                    # Handle the case where the tool is not found
                     result_text = f"Error: Tool '{tool_call.name}' not found."
                 else:
-                    # Call the tool using its specific session
                     result = await target_session.call_tool(tool_call.name, tool_call.input)
                     result_content = []
                     if result.content:
@@ -122,7 +110,6 @@ class MCPClient:
 
     async def chat_loop(self):
         print("\nMCP Host started with all connected servers.")
-        print("You can now use tools from any server.")
         print("Type queries or 'quit' to exit.")
         
         while True:
@@ -145,7 +132,7 @@ async def main():
         print("usage: python client.py <path_to_server1> <path_to_server2> ...")
         sys.exit(1)
 
-    client_host = MCPClient()
+    client_host = MCPHost()
     try:
         for server_path in sys.argv[1:]:
             await client_host.connect_to_server(server_path)

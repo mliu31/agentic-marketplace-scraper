@@ -20,6 +20,6 @@ stack
 - gemini api
 - playwright mcp
 - postgres db mcp
-- email mcp (write myself)
+- email mcp (https://github.com/jasonsum/gmail-mcp-server?tab=readme-ov-file)
 
 other anthropic models https://docs.anthropic.com/en/docs/about-claude/model-deprecations

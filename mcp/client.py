@@ -20,42 +20,41 @@ class MCPHost:
         self.anthropic = Anthropic()
         self.conversation_history = []
 
-    async def connect_to_server(self, server_script_path: str):
+    async def connect_to_server(self, server_cmd: str):
         """Connect to a server and add its tools to the host."""
-        is_python = server_script_path.endswith('.py')
-        is_js = server_script_path.endswith('.js')
-        
-        if not (is_python or is_js):
-            raise ValueError("server script must be .py or .js")
-
-        command = "python" if is_python else "node"
-        server_params = StdioServerParameters(command=command, args=[server_script_path], env=None)
+        if not server_cmd:
+            raise ValueError("empty server command")
+        server_params = StdioServerParameters(command=server_cmd[0], args=server_cmd[1:], env=None)
 
         # Each server gets its own transport and session
-        stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
-        stdio, write = stdio_transport
+        transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
+        stdio, write = transport
         session = await self.exit_stack.enter_async_context(ClientSession(stdio, write))
         
-        await session.initialize()
+        try:
+            await session.initialize()
+        except Exception as e:
+            raise RuntimeError(f"failed to initialize server: {' '.join(server_cmd)}") from e
         
         # Store session
-        self.sessions[server_script_path] = session
+        self.sessions[" ".join(server_cmd)] = session
         
         # Get tools for this server
-        response = await session.list_tools()
-        server_tools = [{
-            "name": tool.name,
-            "description": tool.description,
-            "input_schema": tool.inputSchema
-        } for tool in response.tools]
-        
-        print(f"Connected to {server_script_path} with tools:")
-        for tool in server_tools:
-            print(f"---name: {tool['name']}")
+        resp = await session.list_tools()
+        for t in resp.tools:
+            tool = {"name": t.name, "description": t.description, "input_schema": t.inputSchema}
             self.tools.append(tool)
-            self.tool_to_session_map[tool['name']] = session
+            self.tool_to_session_map[t.name] = session
+        print(f"connected: {' '.join(server_cmd)} -> {[t.name for t in resp.tools]}")
+    
+    def truncate_history(self, max_messages=50):
+            """Keep conversation history under max_messages to prevent context overflow"""
+            if len(self.conversation_history) > max_messages:
+                self.conversation_history = self.conversation_history[-max_messages:]
             
     async def process_query(self, query: str) -> str:
+        """Process query with Claude using atomic message blocks - complete assistant responses followed by complete tool results"""
+        self.truncate_history()
         self.conversation_history.append({"role": "user", "content": query})
         log_parts = []
 
@@ -67,21 +66,24 @@ class MCPHost:
                 tools=self.tools
             )
 
+            # Parse model response
             assistant_content = []
             tool_calls_to_execute = []
             for content in claude_response.content:
+                assistant_content.append(content)
                 if content.type == 'text':
-                    assistant_content.append(content)
                     log_parts.append(content.text)
                 elif content.type == 'tool_use':
-                    assistant_content.append(content)
                     tool_calls_to_execute.append(content)
             
+            # Log entire LLM response as one assistant message
             self.conversation_history.append({"role": "assistant", "content": assistant_content})
 
+            # If no tool calls, we've completed the assistant message
             if not tool_calls_to_execute:
                 break
 
+            # Execute tool calls 
             tool_results = []
             for tool_call in tool_calls_to_execute:
                 log_parts.append(f"CALLING TOOL: {tool_call.name} WITH {tool_call.input}")
@@ -104,6 +106,7 @@ class MCPHost:
                     "content": result_text
                 })
 
+            # Log all tool call results as one user message
             self.conversation_history.append({"role": "user", "content": tool_results})
         
         return '\n'.join(log_parts)
@@ -128,14 +131,14 @@ class MCPHost:
         await self.exit_stack.aclose()
 
 async def main():
-    if len(sys.argv) < 2:
-        print("usage: python client.py <path_to_server1> <path_to_server2> ...")
-        sys.exit(1)
+    servers = [[sys.executable, "C:/Users/mgnli/agentic-marketplace-scraper/mcp/weather.py"], 
+    [sys.executable, "C:/Users/mgnli/agentic-marketplace-scraper/mcp/weather2.py"], 
+    ["uv", "--directory","C:/Users/mgnli/gmail-mcp-server", "run", "gmail", "--creds-file-path", "C:/Users/mgnli/gmail-mcp-server/gmail_creds.json", "--token-path", "C:/Users/mgnli/gmail-mcp-server/gmail_tokens.json"]]
 
     client_host = MCPHost()
     try:
-        for server_path in sys.argv[1:]:
-            await client_host.connect_to_server(server_path)
+        for server_params in servers:
+            await client_host.connect_to_server(server_params)
         
         await client_host.chat_loop()
     finally:
